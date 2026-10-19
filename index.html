@@ -39,34 +39,41 @@ function make(){const actual=kind==='mixed'?['delay','shorten','staff'][rnd(0,2)
 function render(){const labelBoxes=[];
 function labelPosition(edge){
  const [x1,y1]=problem.t.pos[edge.a],[x2,y2]=problem.t.pos[edge.b];
- const dx=x2-x1,dy=y2-y1,len=Math.hypot(dx,dy)||1;
- const nx=-dy/len,ny=dx/len;
+ const mx=(x1+x2)/2,my=(y1+y2)/2;
  const label=String.fromCharCode(65+edge.id)+'：'+edge.d+'日';
- const w=label.length*15+16,h=27;
+ // 日本語と半角文字の表示幅を別々に見積もり、結合点から必ず離す。
+ const w=[...label].reduce((n,c)=>n+(/[\x00-\x7f]/.test(c)?9:16),0)+18;
+ const h=27;
  let best=null;
- for(const fraction of [0.5,0.42,0.58,0.34,0.66,0.25,0.75,0.15,0.85]){
-  for(const distance of [-21,21,-34,34,-47,47,-62,62,-78,78]){
-   const x=x1+dx*fraction+nx*distance,y=y1+dy*fraction+ny*distance;
-   const box={left:x-w/2,right:x+w/2,top:y-18,bottom:y+6};
-   let penalty=0;
-   for(const [cx,cy] of problem.t.pos){
-    const px=Math.max(box.left,Math.min(cx,box.right));
-    const py=Math.max(box.top,Math.min(cy,box.bottom));
-    if(Math.hypot(cx-px,cy-py)<32)penalty+=100000;
-   }
-   for(const b of labelBoxes){
-    const ox=Math.max(0,Math.min(box.right,b.right)-Math.max(box.left,b.left));
-    const oy=Math.max(0,Math.min(box.bottom,b.bottom)-Math.max(box.top,b.top));
-    penalty+=ox*oy*100;
-   }
-   if(box.left<8||box.right>592||box.top<8||box.bottom>292)penalty+=3000;
-   penalty+=Math.abs(distance)*0.5+Math.abs(fraction-0.5)*35;
-   if(!best||penalty<best.penalty)best={x,y,box,penalty};
+ // 矢印付近で見つからない場合も、図全体から安全な場所を探す。
+ for(let y=22;y<=282;y+=10)for(let x=22;x<=578;x+=10){
+  const box={left:x-w/2,right:x+w/2,top:y-19,bottom:y+8};
+  if(box.left<5||box.right>595||box.top<5||box.bottom>295)continue;
+  let invalid=false;
+  for(const [cx,cy] of problem.t.pos){
+   const px=Math.max(box.left,Math.min(cx,box.right));
+   const py=Math.max(box.top,Math.min(cy,box.bottom));
+   if(Math.hypot(cx-px,cy-py)<27){invalid=true;break}
   }
+  if(invalid)continue;
+  for(const b of labelBoxes){
+   if(box.left<b.right+5&&box.right>b.left-5&&box.top<b.bottom+5&&box.bottom>b.top-5){invalid=true;break}
+  }
+  if(invalid)continue;
+  // 中点に近く、線から少し離れた位置を優先する。
+  const dx=x2-x1,dy=y2-y1,segLen=Math.hypot(dx,dy)||1;
+  const lineDist=Math.abs(dy*(x-mx)-dx*(y-my))/segLen;
+  const centerDist=Math.hypot(x-mx,y-my);
+  const score=centerDist+Math.max(0,20-lineDist)*3;
+  if(!best||score<best.score)best={x,y,box,score};
+ }
+ if(!best){
+  // 非常に密集した図でもラベルを消さない最終手段。
+  best={x:Math.min(570,Math.max(60,mx)),y:Math.max(24,Math.min(275,my-40)),box:{left:mx-w/2,right:mx+w/2,top:my-59,bottom:my-32}};
  }
  labelBoxes.push(best.box);return best;
 }
-const s=$('graph');s.innerHTML='';const NS='http://www.w3.org/2000/svg';function el(tag,attrs,parent=s){const e=document.createElementNS(NS,tag);Object.entries(attrs).forEach(([k,v])=>e.setAttribute(k,v));parent.append(e);return e}const defs=el('defs',{});const labelLayer=el('g',{'aria-hidden':'true'});for(const [name,color] of [['normal','#73859e'],['selected','#e57d16'],['correct','#cf3044']]){const m=el('marker',{id:'arrow-'+name,markerWidth:8,markerHeight:8,refX:7,refY:3,orient:'auto',markerUnits:'userSpaceOnUse'},defs);el('path',{d:'M0,0 L7,3 L0,6 Z',fill:color},m)}for(const e of problem.edges){const [x1,y1]=problem.t.pos[e.a],[x2,y2]=problem.t.pos[e.b],dx=x2-x1,dy=y2-y1,len=Math.hypot(dx,dy),ux=dx/len,uy=dy/len,start=[x1+ux*23,y1+uy*23],end=[x2-ux*24,y2-uy*24],isCorrect=revealed&&(problem.actual==='basic'?problem.critical:problem.applied.after.critical).includes(e.id),isSel=selected.has(e.id),style=isCorrect?'correct':isSel?'selected':'normal',g=el('g',{role:'button',tabindex:'0','aria-label':`作業${String.fromCharCode(65+e.id)} ${e.d}日`});el('line',{x1:start[0],y1:start[1],x2:end[0],y2:end[1],class:'edge hit'},g);el('line',{x1:start[0],y1:start[1],x2:end[0],y2:end[1],class:'edge visible '+(style==='normal'?'':style),'marker-end':'url(#arrow-'+style+')'},g);const lp=labelPosition(e);const txt=el('text',{x:lp.x,y:lp.y,'text-anchor':'middle',class:'edgeLabel'},labelLayer);txt.textContent=String.fromCharCode(65+e.id)+'：'+e.d+'日';const toggle=()=>{if(revealed||answered||problem.actual!=='basic')return;selected.has(e.id)?selected.delete(e.id):selected.add(e.id);render()};g.addEventListener('click',toggle);g.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();toggle()}})}problem.t.pos.forEach(([x,y],i)=>{el('circle',{cx:x,cy:y,r:21,class:'node'});const text=el('text',{x,y:y+6,'text-anchor':'middle',class:'nodeText'});text.textContent="";if(revealed){const v=el('text',{x,y:y-29,'text-anchor':'middle',class:'edgeLabel'});v.textContent=`${problem.earliest[i]} / ${problem.latest[i]}`}});s.append(labelLayer);$('selectedText').textContent='選択中の作業：'+(selected.size?[...selected].sort((a,b)=>a-b).map(i=>String.fromCharCode(65+i)).join('・'):'なし');const buttons=$('edgeButtons');buttons.replaceChildren();problem.edges.forEach(e=>{const b=document.createElement('button');const chosen=selected.has(e.id);b.type='button';b.textContent='作業 '+String.fromCharCode(65+e.id)+(chosen?' ?':'');b.classList.toggle('active',chosen);b.setAttribute('aria-pressed',String(chosen));b.disabled=revealed||answered||problem.actual!=='basic';b.onclick=()=>{selected.has(e.id)?selected.delete(e.id):selected.add(e.id);render()};buttons.append(b)})}
+const s=$('graph');s.innerHTML='';const NS='http://www.w3.org/2000/svg';function el(tag,attrs,parent=s){const e=document.createElementNS(NS,tag);Object.entries(attrs).forEach(([k,v])=>e.setAttribute(k,v));parent.append(e);return e}const defs=el('defs',{});const labelLayer=el('g',{'aria-hidden':'true'});for(const [name,color] of [['normal','#73859e'],['selected','#e57d16'],['correct','#cf3044']]){const m=el('marker',{id:'arrow-'+name,markerWidth:8,markerHeight:8,refX:7,refY:3,orient:'auto',markerUnits:'userSpaceOnUse'},defs);el('path',{d:'M0,0 L7,3 L0,6 Z',fill:color},m)}for(const e of problem.edges){const [x1,y1]=problem.t.pos[e.a],[x2,y2]=problem.t.pos[e.b],dx=x2-x1,dy=y2-y1,len=Math.hypot(dx,dy),ux=dx/len,uy=dy/len,start=[x1+ux*23,y1+uy*23],end=[x2-ux*24,y2-uy*24],isCorrect=revealed&&(problem.actual==='basic'?problem.critical:problem.applied.after.critical).includes(e.id),isSel=selected.has(e.id),style=isCorrect?'correct':isSel?'selected':'normal',g=el('g',{role:'button',tabindex:'0','aria-label':`作業${String.fromCharCode(65+e.id)} ${e.d}日`});el('line',{x1:start[0],y1:start[1],x2:end[0],y2:end[1],class:'edge hit'},g);el('line',{x1:start[0],y1:start[1],x2:end[0],y2:end[1],class:'edge visible '+(style==='normal'?'':style),'marker-end':'url(#arrow-'+style+')'},g);const lp=labelPosition(e);const group=el('g',{},labelLayer);const txt=el('text',{x:lp.x,y:lp.y,'text-anchor':'middle',class:'edgeLabel'},group);txt.textContent=String.fromCharCode(65+e.id)+'：'+e.d+'日';const bg=el('rect',{x:lp.box.left,y:lp.box.top,width:lp.box.right-lp.box.left,height:lp.box.bottom-lp.box.top,rx:4,fill:'#fff',opacity:'0.96'},group);group.insertBefore(bg,txt);const toggle=()=>{if(revealed||answered||problem.actual!=='basic')return;selected.has(e.id)?selected.delete(e.id):selected.add(e.id);render()};g.addEventListener('click',toggle);g.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();toggle()}})}problem.t.pos.forEach(([x,y],i)=>{el('circle',{cx:x,cy:y,r:21,class:'node'});const text=el('text',{x,y:y+6,'text-anchor':'middle',class:'nodeText'});text.textContent="";if(revealed){const v=el('text',{x,y:y-29,'text-anchor':'middle',class:'edgeLabel'});v.textContent=`${problem.earliest[i]} / ${problem.latest[i]}`}});s.append(labelLayer);$('selectedText').textContent='選択中の作業：'+(selected.size?[...selected].sort((a,b)=>a-b).map(i=>String.fromCharCode(65+i)).join('・'):'なし');const buttons=$('edgeButtons');buttons.replaceChildren();problem.edges.forEach(e=>{const b=document.createElement('button');const chosen=selected.has(e.id);b.type='button';b.textContent='作業 '+String.fromCharCode(65+e.id)+(chosen?' ?':'');b.classList.toggle('active',chosen);b.setAttribute('aria-pressed',String(chosen));b.disabled=revealed||answered||problem.actual!=='basic';b.onclick=()=>{selected.has(e.id)?selected.delete(e.id):selected.add(e.id);render()};buttons.append(b)})}
 function hint(){if(mode==='exam'&&!answered)return;const h=$('hint');h.classList.remove('hidden');h.textContent=problem.actual==='basic'?'ヒント：合流する点の到着時刻は最大値を使います。各経路の日数を比較してください。':'ヒント：まず当初と遅延後の完了日数を比べます。Dの短縮では別経路E→Fも確認します。要員計算は人数×日数が一定という条件を使います。'}
 function explanation(){if(mode==='exam'&&!answered)return;revealed=true;render();const e=$('explanation');e.classList.remove('hidden');if(problem.actual!=='basic'){const a=problem.applied,b=problem.edges,ac=b[0].d+b[2].d,bd=a.branchDays,ef=b[4].d+b[5].d;e.innerHTML=`<strong>段階解説</strong><ol class="steps"><li>当初は A→C→D = ${ac}+${a.durationD} = ${a.baseDuration}日、${a.branchLabel}→D = ${bd}+${a.durationD} = ${a.baseDuration}日です。</li><li>Bが${a.delay}日遅れると、${a.branchLabel}→D は ${bd}+${a.delay}+${a.durationD} = <b>${a.afterDuration}日</b>です。</li><li>元の予定 ${a.baseDuration}日に戻すには、Dを <b>${a.shorten}日</b>短縮して ${a.durationD-a.shorten}日で終える必要があります。${a.branchLabel}→E→F は ${bd}+${a.delay}+${ef} = ${bd+a.delay+ef}日で、予定を超えません。</li>${problem.actual==='staff'?`<li>作業量は ${a.workers}人 × ${a.durationD}日 = ${a.workers*a.durationD}人日です。</li><li>必要総人数は ${a.workers*a.durationD} ÷ ${a.durationD-a.shorten} = <b>${a.required}人</b>。追加人数は ${a.required}?${a.workers}=<b>${a.added}人</b>です。</li>`:''}</ol><small>遅延後のクリティカル作業を赤色で示しています。人数と日数が反比例するという設問条件で計算しています。</small>`;return}const fmt=a=>a.map((v,i)=>`${i+1}番=${v}`).join('、'),crit=problem.critical.map(id=>String.fromCharCode(65+id)).join('・');e.innerHTML='<strong>解説</strong><ol class="steps"><li>開始点を0日として、矢印の所要日数を順に足します。合流する点では最大値を選びます。</li><li>最早結合点時刻：'+fmt(problem.earliest)+'</li><li>終了点から逆算して最遅結合点時刻を求めます。分岐する点では最小値を選びます。</li><li>最遅結合点時刻：'+fmt(problem.latest)+'</li><li>所要日数は <b>'+problem.duration+'日</b>。赤い矢印（'+crit+'）がクリティカルな作業です。</li></ol><small>結合点上の表示は「最早 / 最遅」です。</small>'}
 function read(){try{const a=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(a)?a:[]}catch{return[]}}function save(a){try{localStorage.setItem(KEY,JSON.stringify(a))}catch{alert('このブラウザでは履歴を保存できません。')}}function check(){if(answered)return;let ok=false,days=0,detail='';if(problem.actual==='basic'){const raw=$('days').value;if(raw.trim()===''){alert('所要日数を入力してください。');return}days=Number(raw);const daysOK=days===problem.duration,pathOK=selected.size===problem.critical.length&&problem.critical.every(id=>selected.has(id));ok=daysOK&&pathOK;detail=`所要日数：${daysOK?'正解':'不正解'}／クリティカルパス：${pathOK?'正解':'不正解'}`}else{const a=problem.applied,defs=problem.actual==='delay'?[['before',a.baseDuration],['after',a.afterDuration]]:problem.actual==='shorten'?[['before',a.baseDuration],['after',a.afterDuration],['short',a.shorten]]:[['before',a.baseDuration],['after',a.afterDuration],['short',a.shorten],['need',a.required],['add',a.added]];if(defs.some(([id])=>$('step-'+id).value.trim()==='')){alert('各計算欄を入力してください。');return}const results=defs.map(([id,v])=>({id,correct:Number($('step-'+id).value)===v}));ok=results.every(x=>x.correct);detail=results.map((x,i)=>`段階${i+1}：${x.correct?'○':'×'}`).join(' ／ ');days=Number($('step-'+defs.at(-1)[0]).value)}answered=true;const f=$('feedback');f.classList.remove('hidden');f.classList.toggle('wrong',!ok);f.textContent=(ok?'正解です！ ':'採点結果：')+detail;const a=read();a.unshift({date:new Date().toLocaleString('ja-JP'),mode:mode==='study'?'学習':'試験',level:['初級','中級','上級'][level],type:problem.actual,days,answer:problem.actual==='basic'?problem.duration:problem.applied[problem.actual==='staff'?'added':problem.actual==='shorten'?'shorten':'afterDuration'],ok});save(a.slice(0,500));$('check').disabled=true;if(mode==='exam'||!ok)explanation()}
